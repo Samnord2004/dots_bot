@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 BASE_API_URL = "https://platform-api.max.ru"
 HEADERS = {"Authorization": config.MAX_BOT_TOKEN, "Content-Type": "application/json"}
 
+# ---------- Утилиты ----------
 async def download_file(url: str, file_path: str):
     async with httpx.AsyncClient() as client:
         try:
@@ -78,7 +79,7 @@ async def finalize_appeal(user_id: int, state: dict):
         board_msg += f"\n\nДля ответа используйте команду: `/answer {appeal_id} текст ответа`"
         if board_chat_id:
             await send_to_chat(int(board_chat_id), board_msg)
-        await send_to_user(user_id, "✅ Ваше обращение принято. Ответ придёт в течение 48 часов.")
+        await send_to_user(user_id, "✅ Ваше обращение принято. Ответ придёт в течение 48 часов. Спасибо!")
         logger.info(f"Обращение #{appeal_id} сохранено")
     except Exception as e:
         logger.exception(f"Ошибка: {e}")
@@ -92,15 +93,15 @@ async def process_appeal_state(user_id: int, text: str = None, attachments: list
     if step == "fullname":
         state["fullname"] = text
         state["step"] = "plot"
-        await send_to_user(user_id, "🏷 Номер участка:")
+        await send_to_user(user_id, "🏷 Номер вашего участка:")
     elif step == "plot":
         state["plot"] = text
         state["step"] = "question"
-        await send_to_user(user_id, "✍️ Ваш вопрос:")
+        await send_to_user(user_id, "✍️ Напишите ваш вопрос или предложение:")
     elif step == "question":
         state["question"] = text
         kb = {"keyboard": [[{"text": "📸 Пропустить"}]], "resize_keyboard": True, "one_time_keyboard": True}
-        await send_to_user(user_id, "📸 Приложите фото или нажмите «Пропустить»", reply_markup=kb)
+        await send_to_user(user_id, "📸 Можете приложить фото (порыв трубы, показания счётчика и т.п.).\nОтправьте изображение или напишите «Пропустить»", reply_markup=kb)
         state["step"] = "photo"
     elif step == "photo":
         if attachments:
@@ -118,14 +119,15 @@ async def process_appeal_state(user_id: int, text: str = None, attachments: list
         if user_id in user_states:
             del user_states[user_id]
 
+# ---------- Обработка команд в чате правления ----------
 async def handle_answer(chat_id: int, text: str):
     parts = text.split(maxsplit=2)
     if len(parts) < 3:
-        await send_to_chat(chat_id, "❌ Формат: `/answer ID текст`")
+        await send_to_chat(chat_id, "❌ Формат: `/answer [ID] [текст ответа]`")
         return
     _, appeal_id_str, response_text = parts
     if not appeal_id_str.isdigit():
-        await send_to_chat(chat_id, "❌ Некорректный ID")
+        await send_to_chat(chat_id, "❌ Некорректный ID обращения.")
         return
     appeal_id = int(appeal_id_str)
     from database import SessionLocal
@@ -133,7 +135,7 @@ async def handle_answer(chat_id: int, text: str):
     try:
         appeal = db.query(Appeal).filter(Appeal.id == appeal_id).first()
         if not appeal:
-            await send_to_chat(chat_id, f"❌ Обращение #{appeal_id} не найдено")
+            await send_to_chat(chat_id, f"❌ Обращение #{appeal_id} не найдено.")
             return
         appeal.board_response = response_text
         appeal.status = "answered"
@@ -142,54 +144,75 @@ async def handle_answer(chat_id: int, text: str):
         db.commit()
         await send_to_user(
             int(appeal.chat_id),
-            f"📩 **Ответ на обращение #{appeal.id}**\n\n{response_text}\n\nОцените ответ цифрой от 1 до 5."
+            f"📩 **Ответ правления на обращение #{appeal.id}**\n\n{response_text}\n\nПожалуйста, оцените качество ответа по шкале от 1 до 5 (отправьте просто цифру)."
         )
         await send_to_chat(chat_id, f"✅ Ответ на обращение #{appeal_id} отправлен.")
     except Exception as e:
         logger.exception(f"Ошибка ответа: {e}")
-        await send_to_chat(chat_id, "❌ Ошибка")
+        await send_to_chat(chat_id, "❌ Ошибка при отправке ответа.")
     finally:
         db.close()
 
+# ---------- Обработка сообщений от пользователей ----------
 async def handle_message(user_id: int, text: str, attachments: list):
     if user_id in user_states:
         if text == "📸 Пропустить" and user_states[user_id].get("step") == "photo":
             await finalize_appeal(user_id, user_states[user_id])
-            await send_to_user(user_id, "Обращение без фото.", reply_markup={"remove_keyboard": True})
+            await send_to_user(user_id, "✅ Обращение отправлено без фото.", reply_markup={"remove_keyboard": True})
             del user_states[user_id]
         else:
             await process_appeal_state(user_id, text, attachments)
     else:
         low = text.lower()
         if text == "/start":
-            await send_to_user(user_id, "🏠 *Главное меню*\nТарифы, Собрание, Протоколы, Облако, План работ, Обратиться, Рейтинг")
+            msg = (
+                "🏠 *Добро пожаловать в бот ДТСН Пенсионер!*\n\n"
+                "Вам доступны команды (напишите слово):\n"
+                "📊 *Тарифы*\n"
+                "🗓 *Собрание*\n"
+                "📄 *Протокол и смета*\n"
+                "📁 *Облако*\n"
+                "📝 *План работ*\n"
+                "✉️ *Обратиться*\n"
+                "🏆 *Рейтинг*\n\n"
+                "Просто напишите нужную команду."
+            )
+            await send_to_user(user_id, msg)
         elif "тариф" in low:
             with next(get_db()) as db:
                 tariffs = db.query(Tariff).all()
                 if tariffs:
-                    msg = "📋 *Тарифы:*\n" + "\n".join(f"• {t.service_name}: {t.price} руб./{t.unit}" for t in tariffs)
+                    msg = "📋 *Тарифы:*\n" + "\n".join(f"• {t.service_name}: {t.price:.2f} руб./{t.unit}" for t in tariffs)
                 else:
-                    msg = "Тарифы не установлены"
+                    msg = "Тарифы не установлены."
             await send_to_user(user_id, msg)
         elif "собрани" in low:
             with next(get_db()) as db:
                 meeting = db.query(Meeting).order_by(Meeting.date.desc()).first()
                 if meeting and meeting.date > datetime.now():
                     msg = f"🗓 *Собрание:* {meeting.date.strftime('%d.%m.%Y %H:%M')}\n{meeting.description or ''}"
+                    if meeting.agenda_items:
+                        msg += "\n\n*Повестка дня:*"
+                        for idx, item in enumerate(meeting.agenda_items, 1):
+                            msg += f"\n{idx}. {item.get('text')}"
+                            if item.get('files'):
+                                msg += f"\n   Файлы: {', '.join(item['files'])}"
                 else:
-                    msg = "Нет собраний"
+                    msg = "Нет запланированных собраний."
             await send_to_user(user_id, msg)
-        elif "протокол" in low or "документ" in low:
+        elif "протокол" in low or "документ" in low or "смет" in low:
             with next(get_db()) as db:
                 docs = db.query(Document).all()
                 if docs:
                     msg = "📂 *Документы:*\n" + "\n".join(f"• {d.title}: [Скачать]({d.file_url})" for d in docs)
                 else:
-                    msg = "Нет документов"
+                    msg = "Документы не загружены."
             await send_to_user(user_id, msg)
         elif "облак" in low:
-            cloud_url = getattr(config, 'YANDEX_DISK_SHARE_URL', 'https://disk.yandex.ru/d/Sv_nzO6hWTHshA')
-            await send_to_user(user_id, f"📁 *Облако:*\n{cloud_url}")
+            cloud_url = getattr(config, 'YANDEX_DISK_SHARE_URL', None)
+            if not cloud_url:
+                cloud_url = "https://disk.yandex.ru/d/Sv_nzO6hWTHshA"
+            await send_to_user(user_id, f"📁 *Облачное хранилище документов:*\n{cloud_url}")
         elif "план" in low or "работ" in low:
             with next(get_db()) as db:
                 tasks = db.query(WorkPlan).all()
@@ -201,9 +224,10 @@ async def handle_message(user_id: int, text: str, attachments: list):
                         lines.append(f"{emoji} {t.task_name}{period} — {t.planned_budget} руб. ({t.completion_percent}%)")
                     msg = "\n".join(lines)
                 else:
-                    msg = "План работ пуст"
+                    msg = "План работ пуст."
             await send_to_user(user_id, msg)
-        elif "рейтинг" in low:
+        elif "рейтинг" in low or "оценк" in low:
+            avg = 0
             month_ago = datetime.now() - timedelta(days=30)
             with next(get_db()) as db:
                 appeals = db.query(Appeal).filter(
@@ -212,15 +236,14 @@ async def handle_message(user_id: int, text: str, attachments: list):
                 ).all()
                 if appeals:
                     avg = sum(a.satisfaction_score for a in appeals) / len(appeals)
-                    stars = "⭐" * int(avg) + ("✨" if avg - int(avg) >= 0.5 else "")
-                    msg = f"🏆 Рейтинг за 30 дней: {avg:.1f}/5\n{stars or '☆☆☆☆☆'}"
-                else:
-                    msg = "Нет оценок за 30 дней"
+            stars = "⭐" * int(avg) + ("✨" if avg - int(avg) >= 0.5 else "")
+            msg = f"🏆 *Рейтинг правления* за 30 дней: {avg:.1f}/5\n{stars or '☆☆☆☆☆'}"
             await send_to_user(user_id, msg)
         elif "обрати" in low or "вопрос" in low:
             user_states[user_id] = {"step": "fullname"}
-            await send_to_user(user_id, "📝 Введите ваши ФИО:")
+            await send_to_user(user_id, "📝 *Обращение в правление*\nВведите ваши ФИО (полностью):")
         else:
+            # Проверяем оценку ответа
             with next(get_db()) as db:
                 last_appeal = db.query(Appeal).filter(
                     Appeal.chat_id == str(user_id),
@@ -231,9 +254,9 @@ async def handle_message(user_id: int, text: str, attachments: list):
                     score = int(text)
                     last_appeal.satisfaction_score = score
                     db.commit()
-                    await send_to_user(user_id, f"🙏 Спасибо за оценку {score}/5!")
+                    await send_to_user(user_id, f"🙏 Благодарим за вашу оценку: {score}/5!")
                 else:
-                    await send_to_user(user_id, "Неизвестная команда. /start")
+                    await send_to_user(user_id, "Неизвестная команда. Напишите /start для списка команд.")
 
 # ---------- Lifespan для планировщика ----------
 @asynccontextmanager
@@ -246,10 +269,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
+# ---------- Вебхук ----------
 @app.post("/webhook")
 async def webhook(request: Request):
     update = await request.json()
-    logger.info(f"Webhook: {update}")
+    logger.info(f"Webhook received: {update}")
     if "message" in update:
         msg = update["message"]
         chat_id = msg.get("recipient", {}).get("chat_id")
@@ -258,6 +282,7 @@ async def webhook(request: Request):
             return {"ok": True}
         text = msg.get("body", {}).get("text", "").strip()
         attachments = msg.get("body", {}).get("attachments", [])
+        # Сообщение из чата правления
         if config.BOARD_CHAT_ID and str(chat_id) == str(config.BOARD_CHAT_ID):
             if text.startswith("/answer"):
                 await handle_answer(chat_id, text)
@@ -265,48 +290,29 @@ async def webhook(request: Request):
             await handle_message(user_id, text, attachments)
     return {"ok": True}
 
-# ---------- Админ-панель (упрощённая, без ошибок) ----------
+# ---------- Админ-панель (полная, красивая, без ошибок) ----------
 def verify_token(token: str):
     return token == config.ADMIN_SECRET_KEY
 
 @app.get("/", response_class=HTMLResponse)
 async def admin_index(request: Request, token: str, db: Session = Depends(get_db)):
     if not verify_token(token):
-        return HTMLResponse("<h1>403 Forbidden</h1>", status_code=403)
+        return HTMLResponse("<h1>403 Forbidden</h1><p>Неверный токен.</p>", status_code=403)
+    
     tariffs = db.query(Tariff).all()
     meetings = db.query(Meeting).order_by(Meeting.date.desc()).all()
     docs = db.query(Document).all()
     works = db.query(WorkPlan).all()
     waiting_appeals = db.query(Appeal).filter(Appeal.status == "waiting").order_by(Appeal.created_at.desc()).all()
-    # Генерируем HTML простой конкатенацией
-    appeals_html = ""
+    
+    # Получаем файлы для обращений
+    appeals_with_files = {}
     for a in waiting_appeals:
         files = db.query(AppealFile).filter(AppealFile.appeal_id == a.id).all()
-        files_html = ""
-        for f in files:
-            files_html += f'<div><strong>Файлы:</strong> <a href="/uploads/{os.path.basename(f.file_path)}">{os.path.basename(f.file_path)}</a></div>'
-        appeals_html += f'''
-        <div class="appeal">
-            <div><strong>#{a.id}</strong> от {a.created_at.strftime("%d.%m.%Y %H:%M")}</div>
-            <div><strong>ФИО:</strong> {a.full_name}</div>
-            <div><strong>Участок:</strong> {a.plot_number}</div>
-            <div><strong>Вопрос:</strong> {a.question}</div>
-            {files_html}
-            <form method="post" action="/answer_appeal">
-                <input type="hidden" name="token" value="{token}">
-                <input type="hidden" name="appeal_id" value="{a.id}">
-                <textarea name="response_text" rows="3" cols="50" placeholder="Введите ответ..."></textarea><br>
-                <button type="submit">📤 Отправить ответ</button>
-            </form>
-        </div>
-        '''
-    if not appeals_html:
-        appeals_html = "<p>Нет обращений</p>"
-    tariffs_html = "<ul>"
-    for t in tariffs:
-        tariffs_html += f'<li>{t.service_name}: {t.price} руб./{t.unit} <a class="delete" href="/delete_tariff?id={t.id}&token={token}">[Удалить]</a></li>'
-    tariffs_html += "</ul>"
-    meetings_html = "<ul>"
+        appeals_with_files[a.id] = files
+    
+    # Формируем HTML для собраний с повесткой
+    meetings_html = ""
     for m in meetings:
         meetings_html += f'<li><strong>{m.date.strftime("%d.%m.%Y %H:%M")}</strong>: {m.description or ""}<br>'
         if m.agenda_items:
@@ -318,16 +324,14 @@ async def admin_index(request: Request, token: str, db: Session = Depends(get_db
                 meetings_html += "</li>"
             meetings_html += "</ul>"
         meetings_html += f' <a class="delete" href="/delete_meeting?id={m.id}&token={token}">[Удалить]</a></li>'
-    meetings_html += "</ul>"
-    docs_html = "<ul>"
-    for d in docs:
-        docs_html += f'<li>{d.title} ({d.doc_type}): <a href="{d.file_url}">Скачать</a> <a class="delete" href="/delete_document?id={d.id}&token={token}">[Удалить]</a></li>'
-    docs_html += "</ul>"
-    works_html = "<ul>"
+    
+    # Формируем HTML для плана работ
+    works_html = ""
     for w in works:
         period = f', период: {w.start_date.strftime("%d.%m.%Y")} - {w.end_date.strftime("%d.%m.%Y")}' if w.start_date and w.end_date else ''
         works_html += f'<li>{w.task_name}: бюджет {w.planned_budget} руб., статус {w.status}, выполнено {w.completion_percent}%{period} <a class="delete" href="/delete_workplan?id={w.id}&token={token}">[Удалить]</a></li>'
-    works_html += "</ul>"
+    
+    # Основной HTML
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -347,80 +351,6 @@ async def admin_index(request: Request, token: str, db: Session = Depends(get_db
             .appeal {{ margin-bottom: 20px; padding: 10px; background: #f9f9f9; border-left: 3px solid #1a5f7a; }}
             .agenda-item {{ background: #eef; padding: 10px; margin: 10px 0; }}
         </style>
-    </head>
-    <body>
-        <h1>📋 Панель управления ДТСН "Пенсионер"</h1>
-        <div class="section">
-            <h2>✉️ Обращения (ожидают ответа)</h2>
-            {appeals_html}
-        </div>
-        <div class="section">
-            <h2>📊 Тарифы</h2>
-            {tariffs_html}
-            <form method="post" action="/add_tariff">
-                <input type="hidden" name="token" value="{token}">
-                <input type="text" name="service_name" placeholder="Название" required>
-                <input type="number" step="0.01" name="price" placeholder="Цена" required>
-                <input type="text" name="unit" placeholder="Ед. изм" required>
-                <button type="submit">➕ Добавить</button>
-            </form>
-        </div>
-        <div class="section">
-            <h2>🗓 Собрания</h2>
-            {meetings_html}
-            <form method="post" action="/add_meeting">
-                <input type="hidden" name="token" value="{token}">
-                <input type="datetime-local" name="date" required>
-                <input type="text" name="description" placeholder="Описание собрания" style="width: 100%;"><br>
-                <div id="agenda-container"></div>
-                <button type="button" onclick="addAgendaItem()">➕ Добавить вопрос повестки</button><br>
-                <button type="submit">Сохранить собрание</button>
-            </form>
-        </div>
-        <div class="section">
-            <h2>📄 Документы</h2>
-            {docs_html}
-            <form method="post" action="/add_document">
-                <input type="hidden" name="token" value="{token}">
-                <select name="doc_type">
-                    <option value="protocol">Протокол</option>
-                    <option value="resolution">Решение</option>
-                    <option value="budget">Смета</option>
-                </select>
-                <input type="text" name="title" placeholder="Название" required>
-                <input type="url" name="file_url" placeholder="Ссылка на файл" required>
-                <button type="submit">➕ Добавить</button>
-            </form>
-        </div>
-        <div class="section">
-            <h2>📝 План работ</h2>
-            {works_html}
-            <form method="post" action="/add_workplan">
-                <input type="hidden" name="token" value="{token}">
-                <input type="text" name="task_name" placeholder="Название задачи" required><br>
-                <input type="number" step="0.01" name="planned_budget" placeholder="Бюджет" required><br>
-                <select name="status">
-                    <option value="planned">Запланировано</option>
-                    <option value="in_progress">В работе</option>
-                    <option value="completed">Завершено</option>
-                </select><br>
-                <input type="number" name="completion_percent" placeholder="Процент выполнения" value="0"><br>
-                <label>Дата начала: <input type="date" name="start_date"></label><br>
-                <label>Дата окончания: <input type="date" name="end_date"></label><br>
-                <button type="submit">➕ Добавить задачу</button>
-            </form>
-        </div>
-        <div class="section">
-            <h2>🏆 Рейтинг удовлетворённости</h2>
-            <form method="get" action="/rating">
-                <input type="hidden" name="token" value="{token}">
-                <label>Период:</label>
-                <input type="date" name="date_from" value="{datetime.now().replace(day=1).strftime('%Y-%m-%d')}">
-                <input type="date" name="date_to" value="{datetime.now().strftime('%Y-%m-%d')}">
-                <button type="submit">Показать рейтинг</button>
-            </form>
-        </div>
-        <p><a href="/?token={token}">🔄 Обновить страницу</a></p>
         <script>
             let agendaIndex = 0;
             function addAgendaItem() {{
@@ -436,19 +366,120 @@ async def admin_index(request: Request, token: str, db: Session = Depends(get_db
                 agendaIndex++;
             }}
         </script>
+    </head>
+    <body>
+        <h1>📋 Панель управления ДТСН "Пенсионер"</h1>
+        
+        <div class="section">
+            <h2>✉️ Обращения (ожидают ответа)</h2>
+            {''.join(f'''
+            <div class="appeal">
+                <div><strong>#{a.id}</strong> от {a.created_at.strftime("%d.%m.%Y %H:%M")}</div>
+                <div><strong>ФИО:</strong> {a.full_name}</div>
+                <div><strong>Участок:</strong> {a.plot_number}</div>
+                <div><strong>Вопрос:</strong> {a.question}</div>
+                {''.join(f'<div><strong>Файлы:</strong> <a href="{config.BASE_URL}/uploads/{os.path.basename(f.file_path)}">{os.path.basename(f.file_path)}</a></div>' for f in appeals_with_files.get(a.id, []))}
+                <form method="post" action="/answer_appeal">
+                    <input type="hidden" name="token" value="{token}">
+                    <input type="hidden" name="appeal_id" value="{a.id}">
+                    <textarea name="response_text" rows="3" cols="50" placeholder="Введите ответ..."></textarea><br>
+                    <button type="submit">📤 Отправить ответ</button>
+                </form>
+            </div>
+            ''' for a in waiting_appeals) or '<p>Нет обращений</p>'}
+        </div>
+        
+        <div class="section">
+            <h2>📊 Тарифы</h2>
+            <ul>
+                {''.join(f'<li>{t.service_name}: {t.price} руб./{t.unit} <a class="delete" href="/delete_tariff?id={t.id}&token={token}">[Удалить]</a></li>' for t in tariffs) or '<li>Нет тарифов</li>'}
+            </ul>
+            <form method="post" action="/add_tariff">
+                <input type="hidden" name="token" value="{token}">
+                <input type="text" name="service_name" placeholder="Название" required>
+                <input type="number" step="0.01" name="price" placeholder="Цена" required>
+                <input type="text" name="unit" placeholder="Ед. изм" required>
+                <button type="submit">➕ Добавить</button>
+            </form>
+        </div>
+        
+        <div class="section">
+            <h2>🗓 Собрания</h2>
+            <ul>
+                {meetings_html or '<li>Нет собраний</li>'}
+            </ul>
+            <form method="post" action="/add_meeting">
+                <input type="hidden" name="token" value="{token}">
+                <input type="datetime-local" name="date" required>
+                <input type="text" name="description" placeholder="Описание собрания" style="width: 100%;"><br>
+                <div id="agenda-container"></div>
+                <button type="button" onclick="addAgendaItem()">➕ Добавить вопрос повестки</button><br>
+                <button type="submit">Сохранить собрание</button>
+            </form>
+        </div>
+        
+        <div class="section">
+            <h2>📄 Документы</h2>
+            <ul>
+                {''.join(f'<li>{d.title} ({d.doc_type}): <a href="{d.file_url}">Скачать</a> <a class="delete" href="/delete_document?id={d.id}&token={token}">[Удалить]</a></li>' for d in docs) or '<li>Нет документов</li>'}
+            </ul>
+            <form method="post" action="/add_document">
+                <input type="hidden" name="token" value="{token}">
+                <select name="doc_type">
+                    <option value="protocol">Протокол</option>
+                    <option value="resolution">Решение</option>
+                    <option value="budget">Смета</option>
+                </select>
+                <input type="text" name="title" placeholder="Название" required>
+                <input type="url" name="file_url" placeholder="Ссылка на файл" required>
+                <button type="submit">➕ Добавить</button>
+            </form>
+        </div>
+        
+        <div class="section">
+            <h2>📝 План работ</h2>
+            <ul>
+                {works_html or '<li>Нет задач</li>'}
+            </ul>
+            <form method="post" action="/add_workplan">
+                <input type="hidden" name="token" value="{token}">
+                <input type="text" name="task_name" placeholder="Название задачи" required><br>
+                <input type="number" step="0.01" name="planned_budget" placeholder="Бюджет" required><br>
+                <select name="status">
+                    <option value="planned">Запланировано</option>
+                    <option value="in_progress">В работе</option>
+                    <option value="completed">Завершено</option>
+                </select><br>
+                <input type="number" name="completion_percent" placeholder="Процент выполнения" value="0"><br>
+                <label>Дата начала: <input type="date" name="start_date"></label><br>
+                <label>Дата окончания: <input type="date" name="end_date"></label><br>
+                <button type="submit">➕ Добавить задачу</button>
+            </form>
+        </div>
+        
+        <div class="section">
+            <h2>🏆 Рейтинг удовлетворённости работой правления</h2>
+            <form method="get" action="/rating">
+                <input type="hidden" name="token" value="{token}">
+                <label>Период:</label>
+                <input type="date" name="date_from" value="{datetime.now().replace(day=1).strftime('%Y-%m-%d')}">
+                <input type="date" name="date_to" value="{datetime.now().strftime('%Y-%m-%d')}">
+                <button type="submit">Показать рейтинг</button>
+            </form>
+        </div>
+        
+        <p><a href="/?token={token}">🔄 Обновить страницу</a></p>
     </body>
     </html>
     """
     return HTMLResponse(content=html)
 
-# ---------- CRUD ----------
+# ---------- Обработчики CRUD ----------
 @app.post("/answer_appeal")
 async def answer_appeal(appeal_id: int = Form(...), response_text: str = Form(...), token: str = Form(...), db: Session = Depends(get_db)):
-    if not verify_token(token):
-        return HTMLResponse("403", status_code=403)
+    if not verify_token(token): return HTMLResponse("403", status_code=403)
     appeal = db.query(Appeal).filter(Appeal.id == appeal_id).first()
-    if not appeal:
-        return HTMLResponse("Обращение не найдено", status_code=404)
+    if not appeal: return HTMLResponse("Обращение не найдено", status_code=404)
     appeal.board_response = response_text
     appeal.status = "answered"
     appeal.answered_at = datetime.now()
@@ -456,7 +487,7 @@ async def answer_appeal(appeal_id: int = Form(...), response_text: str = Form(..
     db.commit()
     asyncio.create_task(send_to_user(
         int(appeal.chat_id),
-        f"📩 **Ответ правления на обращение #{appeal.id}**\n\n{response_text}\n\nОцените ответ цифрой от 1 до 5."
+        f"📩 **Ответ правления на обращение #{appeal.id}**\n\n{response_text}\n\nПожалуйста, оцените качество ответа по шкале от 1 до 5 (отправьте просто цифру)."
     ))
     return RedirectResponse(f"/?token={token}", status_code=303)
 
