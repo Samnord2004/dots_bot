@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Админ-панель ДТСН</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f0f2f5; }
+        .container { max-width: 1200px; margin: auto; }
+        h1 { color: #1a5f7a; }
+        .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        button { background: #1a5f7a; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #154e63; }
+        .delete-btn { background: #dc3545; margin-left: 10px; }
+        .item-list { list-style: none; padding: 0; }
+        .item-list li { padding: 8px; border-bottom: 1px solid #eee; }
+        .item-list a { float: right; color: red; text-decoration: none; }
+        hr { margin: 20px 0; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>📋 Администрирование ДТСН "Пенсионер"</h1>
+    <div class="card">
+        <h2>📊 Тарифы</h2>
+        <ul class="item-list">
+            {% for t in tariffs %}
+            <li>{{ t.service_name }} — {{ t.price }} руб./{{ t.unit }} <a href="/delete_tariff/{{ t.id }}?token={{ token }}">[Удалить]</a></li>
+            {% endfor %}
+        </ul>
+        <form method="post" action="/add_tariff?token={{ token }}">
+            <div class="form-group"><label>Услуга</label><input name="service_name" required></div>
+            <div class="form-group"><label>Цена</label><input name="price" type="number" step="0.01" required></div>
+            <div class="form-group"><label>Единица</label><input name="unit" placeholder="кВт/ч, м³" required></div>
+            <button>➕ Добавить тариф</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>🗓 Собрания</h2>
+        <ul class="item-list">
+            {% for m in meetings %}
+            <li>{{ m.date.strftime('%d.%m.%Y %H:%M') }} — {{ m.description }} <a href="/delete_meeting/{{ m.id }}?token={{ token }}">[Удалить]</a></li>
+            {% endfor %}
+        </ul>
+        <form method="post" action="/add_meeting?token={{ token }}">
+            <div class="form-group"><label>Дата и время</label><input type="datetime-local" name="date" required></div>
+            <div class="form-group"><label>Описание</label><textarea name="description"></textarea></div>
+            <button>➕ Добавить собрание</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>📄 Документы</h2>
+        <ul class="item-list">
+            {% for d in docs %}
+            <li>{{ d.title }} ({{ d.doc_type }}) — <a href="{{ d.file_url }}" target="_blank">Скачать</a> <a href="/delete_document/{{ d.id }}?token={{ token }}">[Удалить]</a></li>
+            {% endfor %}
+        </ul>
+        <form method="post" action="/add_document?token={{ token }}">
+            <div class="form-group"><label>Тип</label><select name="doc_type"><option>protocol</option><option>resolution</option><option>budget</option></select></div>
+            <div class="form-group"><label>Название</label><input name="title" required></div>
+            <div class="form-group"><label>Ссылка на файл</label><input name="file_url" required></div>
+            <button>➕ Добавить документ</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>📝 План работ</h2>
+        <ul class="item-list">
+            {% for w in works %}
+            <li>{{ w.task_name }} — бюджет: {{ w.planned_budget }} руб., статус: {{ w.status }}, выполнено: {{ w.completion_percent }}% <a href="/delete_workplan/{{ w.id }}?token={{ token }}">[Удалить]</a></li>
+            {% endfor %}
+        </ul>
+        <form method="post" action="/add_workplan?token={{ token }}">
+            <div class="form-group"><label>Задача</label><input name="task_name" required></div>
+            <div class="form-group"><label>Бюджет</label><input name="planned_budget" type="number" step="0.01" required></div>
+            <div class="form-group"><label>Статус</label><select name="status"><option>planned</option><option>in_progress</option><option>completed</option></select></div>
+            <div class="form-group"><label>Выполнено %</label><input name="completion_percent" type="number" min="0" max="100" value="0"></div>
+            <button>➕ Добавить задачу</button>
+        </form>
+    </div>
+</div>
+</body>
+</html>

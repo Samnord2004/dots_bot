@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Админка ДТСН</title>
+    <style>
+        body { font-family: Arial; background: #f4f6f9; margin: 0; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { color: #1a5f7a; }
+        .card { background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .appeal { border-bottom: 1px solid #ddd; padding: 15px; margin-bottom: 10px; }
+        .status-waiting { color: red; font-weight: bold; }
+        .status-answered { color: green; font-weight: bold; }
+        textarea { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 5px; }
+        button { background: #1a5f7a; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; }
+        .rating { color: orange; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📋 Управление обращениями ДТСН "Пенсионер"</h1>
+        <div class="card">
+            <h2>✉️ Обращения собственников</h2>
+            {% for appeal in appeals %}
+            <div class="appeal">
+                <div><strong>№{{ appeal.id }}</strong> | {{ appeal.created_at.strftime('%d.%m.%Y %H:%M') }}</div>
+                <div><strong>ФИО:</strong> {{ appeal.full_name }}</div>
+                <div><strong>Участок:</strong> {{ appeal.plot_number }}</div>
+                <div><strong>Вопрос:</strong> {{ appeal.question }}</div>
+                <div><strong>Статус:</strong> 
+                    {% if appeal.status == 'waiting' %}
+                        <span class="status-waiting">⏳ Ожидает ответа</span>
+                    {% else %}
+                        <span class="status-answered">✅ Отвечено</span>
+                    {% endif %}
+                </div>
+                {% if appeal.status == 'answered' %}
+                    <div><strong>Ответ правления:</strong> {{ appeal.board_response }}</div>
+                    {% if appeal.satisfaction_score %}
+                        <div><strong>Оценка:</strong> <span class="rating">{{ '⭐' * appeal.satisfaction_score }}</span> ({{ appeal.satisfaction_score }}/5)</div>
+                    {% endif %}
+                {% else %}
+                    <form method="post" action="/admin/answer/{{ appeal.id }}">
+                        <textarea name="response_text" rows="3" placeholder="Введите ответ..."></textarea>
+                        <button type="submit">📤 Отправить ответ</button>
+                    </form>
+                {% endif %}
+            </div>
+            {% else %}
+            <p>Нет обращений.</p>
+            {% endfor %}
+        </div>
+    </div>
+</body>
+</html>
